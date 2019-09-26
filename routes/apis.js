@@ -94,4 +94,67 @@ router.post('/editWordData', function(req, res, next) {
     })
 })
 
+router.post('/getWhitelist', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    if (chat_id) {
+        const q = `SELECT * FROM whitelist_url WHERE chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.status(200).send(rows)
+            } else {
+                res.send([])
+            }
+        })
+    }
+})
+
+router.post('/pushWhitelist', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    const pattern = req.body.pattern;
+
+    if (chat_id) {
+        const q = `INSERT INTO whitelist_url (url_pattern, chat_id, created_date) VALUES ('${pattern}', ${chat_id}, now());`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.status(200).send(rows)
+            }
+        })
+    }
+})
+
+router.post('/delWhitelist', function(req, res, next) {
+    const data = req.body.url;
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `DELETE FROM whitelist_url WHERE url_pattern='${data}' AND chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } else {
+                res.status(400).send('there is any word to be deleted. no action')
+            }
+        })
+    }
+})
+
+router.post('/getLogs', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `SELECT * FROM telegram_deleted_msg_log WHERE chat_id=${chat_id};`
+        
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.status(200).send(rows)
+            } else {
+                res.send([])
+            }
+        })
+    }
+})
+
 module.exports = router;
