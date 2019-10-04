@@ -1,4 +1,7 @@
 var express = require('express');
+var fs = require('fs');
+var multer = require('multer');
+
 var router = express.Router();
 var DB = require('../public/javascripts/query');
 var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
@@ -6,17 +9,48 @@ if (conne) {
   console.log('connected with DB successfully');
 }
 
-/* GET home page. */
-router.get('/help', function(req, res, next) {
-  res.render('usage', {title : 'api usages'})
+var admin = require("firebase-admin");
+
+var serviceAccount = require("/Users/ghobekang/Downloads/aqoomchatbot-firebase-adminsdk-609no-19198ee7d7.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: "aqoomchatbot.appspot.com"
 });
+
+var bucket = admin.storage().bucket();
+
+var storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+      cb(null, 'uploads/')
+    },
+    filename: function (req, file, cb) {
+      cb(null, Date.now() + '.' + file.mimetype.split('/')[1])
+    }
+  })
+var upload = new multer({storage: storage});
+
+function delAllFiles(dir) {
+    const path = require('path');
+
+    fs.readdir(dir, (err, files) => {
+        if (err) throw err;
+      
+        for (const file of files) {
+          fs.unlink(path.join(dir, file), err => {
+            if (err) throw err;
+          });
+        }
+      });
+}
 
 router.post('/checkValidation', function(req, res, next) {
     const dataset = {
         type : 'group',
-        title : req.body.title
+        title : req.body.title,
+        ac_code: req.body.ac_code
     }
-    const q = `SELECT * FROM chat WHERE type like '%${dataset.type}%' and title='${dataset.title}';`
+    const q = `SELECT * FROM chat WHERE type like '%${dataset.type}%' and title='${dataset.title}' and activation_code='${dataset.ac_code}'`
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
@@ -152,6 +186,165 @@ router.post('/getLogs', function(req, res, next) {
                 res.status(200).send(rows)
             } else {
                 res.send([])
+            }
+        })
+    }
+})
+
+router.post('/pushFaqlist', upload.array('response_img'), function(req, res, next) {
+    const dataset = {
+        chat_id : req.body.chat_id,
+        response : req.body.response,
+        content : req.body.content,
+        type : req.body.response_type,
+        response_img : req.files.length > 0 ? req.files[0].filename : '',
+        image_type : req.body.img_type
+    }
+    
+    if (dataset.response_img) {
+        bucket.upload(req.files[0].path)
+        .then((file) => {
+            dataset['URL'] = "https://storage.googleapis.com/aqoomchatbot.appspot.com/" + file[0].id
+            upload_content(dataset)
+        })
+    } else {
+        upload_content(dataset)
+    }
+     
+    function upload_content(dataset) {
+        if (dataset.chat_id && dataset.content.length !== 0) {
+            const q = `INSERT INTO faq_list 
+            (chat_id, faq_content, created_date, update_date, faq_response, faq_response_img, response_type, img_type) 
+            VALUES 
+            (${dataset.chat_id}, '${dataset.content}', now(), now(), '${dataset.response}', '${dataset.URL}', '${dataset.type}', '${dataset.img_type}')`
+    
+            conne.query(q, (rows) => {
+                if (rows.affectedRows !== 0) {
+                    if (dataset.type === 'img') {
+                        delAllFiles('../uploads')
+                    }
+                    res.status(200).send(true)
+                } 
+            })
+        }
+    }
+})
+
+router.post('/getFaqlist', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT * FROM faq_list WHERE chat_id=${chat_id};`
+        
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.status(200).send(rows)
+            } else {
+                res.send([])
+            }
+        })
+    }
+})
+
+router.post('/delFaqlist', function(req, res, next) {
+    const data = req.body.content;
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `DELETE FROM faq_list WHERE faq_content='${data}' AND chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } else {
+                res.status(400).send('there is any word to be deleted. no action')
+            }
+        })
+    }
+})
+
+router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, next) {
+    const dataset = {
+        chat_id : req.body.chat_id,
+        content_txt : req.body.content_text,
+        content_img : req.files.length > 0 ? req.files[0].filename : '',
+        content_type : req.body.content_type,
+        image_type : req.body.img_type
+    }
+    
+    if (dataset.content_img !== '') {
+        bucket.upload(req.files[0].path)
+        .then((file) => {
+            dataset['URL'] = "https://storage.googleapis.com/aqoomchatbot.appspot.com/" + file[0].id
+            upload_content(dataset)
+        })
+    } else {
+        upload_content(dataset)
+    }
+
+    async function check_validation_for_exists(chat_id, callback) {
+        if (chat_id) {
+            const q = `SELECT count(*) FROM start_menus WHERE chat_id=${chat_id}`
+            
+            conne.query(q, (count) => {
+                if (count[0]['count(*)'] !== 0) {
+                    if (typeof callback === 'function') {
+                        return callback(true)
+                    }
+                } else {
+                    if (typeof callback === 'function') {
+                        return callback(false)
+                    }
+                }
+            })
+        }
+    }
+    
+    function upload_content (dataset) {
+        if (dataset.chat_id) {
+            check_validation_for_exists(dataset.chat_id, (check_validation) => {
+                var q = ''
+                if (check_validation) {
+                    q = `UPDATE start_menus 
+                    SET 
+                        content_txt='${dataset.content_txt}', content_img='${dataset.URL}', img_type='${dataset.image_type}', response_type='${dataset.content_type}', update_date=now()
+                    WHERE
+                        chat_id=${dataset.chat_id};`
+                    
+                } else {
+                    q = `INSERT INTO start_menus 
+                    (chat_id, content_txt, content_img, img_type, response_type, created_date, update_date) 
+                    VALUES 
+                    (${dataset.chat_id}, '${dataset.content_txt}', '${dataset.URL}', '${dataset.image_type}', '${dataset.content_type}', now(), now());`
+                }
+
+                conne.query(q, (rows) => {
+                    if (rows.affectedRows !== 0) {
+                        if (dataset.content_type === 'img') {
+                            delAllFiles('../uploads')
+                        }
+                        
+                        res.status(200).send(true)
+                    } 
+                })
+            })
+
+        }
+    }
+
+})
+
+router.post('/getStartMenu', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT * FROM start_menus WHERE chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.length > 0) {
+                res.status(200).send(rows)
+            } else {
+                res.status(400)
             }
         })
     }
