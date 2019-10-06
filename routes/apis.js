@@ -32,12 +32,12 @@ var upload = new multer({storage: storage});
 
 function delAllFiles(dir) {
     const path = require('path');
-
-    fs.readdir(dir, (err, files) => {
+    const rpath = path.join(__dirname, dir);
+    fs.readdir(rpath, (err, files) => {
         if (err) throw err;
       
         for (const file of files) {
-          fs.unlink(path.join(dir, file), err => {
+          fs.unlink(path.join(rpath, file), err => {
             if (err) throw err;
           });
         }
