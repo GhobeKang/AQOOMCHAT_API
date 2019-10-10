@@ -1,8 +1,11 @@
 var express = require('express');
 var fs = require('fs');
 var multer = require('multer');
+var cookieParser = require('cookie-parser');
 
 var router = express.Router();
+router.use(cookieParser());
+
 var DB = require('../public/javascripts/query');
 var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
 if (conne) {
@@ -44,6 +47,50 @@ function delAllFiles(dir) {
       });
 }
 
+router.post('/getDefaultInfo', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    const q = `SELECT 
+        chat.type as type,
+        chat.title as title,
+        chat.created_at as created_at,
+        chat.depence_count as depence_count,
+        chat.is_active as is_active,
+        chat.count_msgs as count_msgs
+        FROM 
+            chat
+        WHERE
+            id=${chat_id}`    
+
+    conne.query(q, (rows) => {
+        if (rows.length !== 0) {
+            res.send(rows[0])
+        } else {
+            res.send(false)
+        }
+    })
+})
+
+router.post('/checkValidationRoom', function(req, res, next) {
+    const dataset = {
+        type : 'group',
+        title : req.body.title
+    }
+    const q = `SELECT * FROM chat WHERE type='${dataset.type}' and title='${dataset.title}'`
+    
+    conne.query(q, (rows) => {
+        if (rows.length !== 0) {
+            if (rows[0].is_active) {
+                res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
+            } else {
+                res.send(false)
+            }
+        } else {
+            res.status(400).send(false)
+        }
+    });
+})
+
 router.post('/checkValidation', function(req, res, next) {
     const dataset = {
         type : 'group',
@@ -54,7 +101,10 @@ router.post('/checkValidation', function(req, res, next) {
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
-            res.send({id: rows[0].id})
+            const q = `UPDATE chat SET is_active=1 WHERE activation_code='${dataset.ac_code}'`
+            conne.query(q, (result) => {
+                res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
+            })
         } else {
             res.send(false)
         }
