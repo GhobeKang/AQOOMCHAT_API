@@ -1,24 +1,26 @@
 var express = require('express');
 var fs = require('fs');
 var multer = require('multer');
+var MulterGCS = require('multer-google-storage');
+const {format} = require('util');
 var cookieParser = require('cookie-parser');
 
 var router = express.Router();
 router.use(cookieParser());
 
 var DB = require('../public/javascripts/query');
-var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
+var conne = new DB('chatbot-258301:asia-northeast2:aqoomchat', 'root', 'aq@@mServ!ce', 'aqoomchat');
 if (conne) {
   console.log('connected with DB successfully');
 }
 
 var admin = require("firebase-admin");
 
-var serviceAccount = require("/Users/ghobekang/Downloads/aqoomchatbot-firebase-adminsdk-609no-19198ee7d7.json");
+var serviceAccount = require("../chatbot-258301-c2fa645f32de.json");
 
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    storageBucket: "aqoomchatbot.appspot.com"
+    storageBucket: "chatbot-258301.appspot.com"
 });
 
 var bucket = admin.storage().bucket();
@@ -31,7 +33,7 @@ var storage = multer.diskStorage({
       cb(null, Date.now() + '.' + file.mimetype.split('/')[1])
     }
   })
-var upload = new multer({storage: storage});
+var upload = new multer({storage: multer.memoryStorage()});
 
 function delAllFiles(dir) {
     const path = require('path');
@@ -47,10 +49,12 @@ function delAllFiles(dir) {
       });
 }
 
+
 router.post('/getDefaultInfo', function(req, res, next) {
     const chat_id = req.body.chat_id;
     
     const q = `SELECT 
+        chat.id as chat_id,
         chat.type as type,
         chat.title as title,
         chat.created_at as created_at,
@@ -58,7 +62,7 @@ router.post('/getDefaultInfo', function(req, res, next) {
         chat.is_active as is_active,
         chat.count_msgs as count_msgs
         FROM 
-            chat
+            aqoomchat.chat
         WHERE
             id=${chat_id}`    
 
@@ -113,18 +117,10 @@ router.post('/checkValidation', function(req, res, next) {
 
 router.post('/getWordData', function(req, res, next) {
     const q = `SELECT * FROM forb_wordlist where chat_id=${req.body.chat_id}`
-    let data = []
 
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
-            for(row of rows) {
-                const dataset = {
-                    idx : row.idx,
-                    name : row.word_name
-                }
-                data.push(dataset)
-            }
-            res.send(data)
+            res.send(rows)
         } else {
             res.send(false)
         }
@@ -136,7 +132,7 @@ router.post('/pushWordData', function(req, res, next) {
         res.status(404).send('there is no valid query string. you must involve it to get a query result')
         return false;
     }
-    const q = `INSERT INTO forb_wordlist (word_name, chat_id) VALUES ('${req.body.word}', ${req.body.chat_id})`
+    const q = `INSERT INTO forb_wordlist (word_name, chat_id, created_time, is_active) VALUES ('${req.body.word}', ${req.body.chat_id}, now(), 1)`
     conne.query(q, (rows) => {
         if (rows.affectedRows !== 0 && rows.insertId) {
             res.status(200).send(true)
@@ -160,14 +156,16 @@ router.post('/delWordData', function(req, res, next) {
 })
 
 router.post('/editWordData', function(req, res, next) {
-    if (!req.body.ori || !req.body.rep) {
-        res.status(404).send('there is no valid query string. you must involve it to get a query result')
-        return false;
-    }
-    const oriWord = req.body.ori;
-    const replaceWord = req.body.rep;
+    const type = req.body.type;
+    const id = req.body.id;
+    const is_active = req.body.content;
+    
+    let q = '';
 
-    const q = `UPDATE forb_wordlist SET word_name='${replaceWord}' WHERE word_name='${oriWord}' and chat_id=${req.body.chat_id};`
+    if (type === 'status') {
+        q = `UPDATE forb_wordlist SET is_active='${is_active}' WHERE idx=${id} and chat_id=${req.body.chat_id};`
+    } 
+    
     conne.query(q, (rows) => {
         if (rows.changedRows !== 0) {
             res.status(200).send(true)    
@@ -198,7 +196,7 @@ router.post('/pushWhitelist', function(req, res, next) {
     const pattern = req.body.pattern;
 
     if (chat_id) {
-        const q = `INSERT INTO whitelist_url (url_pattern, chat_id, created_date) VALUES ('${pattern}', ${chat_id}, now());`
+        const q = `INSERT INTO whitelist_url (id, url_pattern, chat_id, created_date) VALUES (${Math.floor((Math.random() * 10000) + 1)}, '${pattern}', ${chat_id}, now());`
 
         conne.query(q, (rows) => {
             if (rows.length !== 0) {
@@ -225,6 +223,26 @@ router.post('/delWhitelist', function(req, res, next) {
     }
 })
 
+router.post('/updateWhitelist', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const type = req.body.type;
+    const data = req.body.content;
+    const list_id = req.body.id;
+    let q = '';
+
+    if (type === 'status') {
+        q = `UPDATE aqoomchat.whitelist_url SET is_active=${data} WHERE chat_id=${chat_id} and id=${list_id};`    
+    } else if (type === 'content') {
+        q = `UPDATE aqoomchat.whitelist_url SET url_pattern=${data} WHERE chat_id=${chat_id} and id=${list_id};`
+    }
+
+    conne.query(q, (rows) => {
+        if (rows.affectedRows !== 0) {
+            res.status(200).send(true)
+        } 
+    })
+})
+
 router.post('/getLogs', function(req, res, next) {
     const chat_id = req.body.chat_id;
 
@@ -248,15 +266,32 @@ router.post('/pushFaqlist', upload.array('response_img'), function(req, res, nex
         content : req.body.content,
         type : req.body.response_type,
         response_img : req.files.length > 0 ? req.files[0].filename : '',
-        image_type : req.body.img_type
+        image_type : req.body.img_type,
+        id: Math.floor((Math.random() * 100000) + 1)
     }
     
-    if (dataset.response_img) {
-        bucket.upload(req.files[0].path)
-        .then((file) => {
-            dataset['URL'] = "https://storage.googleapis.com/aqoomchatbot.appspot.com/" + file[0].id
+    if (dataset.response_img !== '') {
+        // Create a new blob in the bucket and upload the file data.
+        const blob = bucket.file(req.files[0].originalname);
+        const blobStream = blob.createWriteStream({
+            resumable: false,
+        });
+
+        blobStream.on('error', err => {
+            next(err);
+        });
+
+        blobStream.on('finish', () => {
+            // The public URL can be used to directly access the file via HTTP.
+            const publicUrl = format(
+            `https://storage.googleapis.com/${bucket.name}/${blob.name}`
+            );
+            dataset['URL'] = publicUrl;
             upload_content(dataset)
-        })
+        });
+
+        blobStream.end(req.files[0].buffer);
+        
     } else {
         upload_content(dataset)
     }
@@ -264,15 +299,12 @@ router.post('/pushFaqlist', upload.array('response_img'), function(req, res, nex
     function upload_content(dataset) {
         if (dataset.chat_id && dataset.content.length !== 0) {
             const q = `INSERT INTO faq_list 
-            (chat_id, faq_content, created_date, update_date, faq_response, faq_response_img, response_type, img_type) 
+            (chat_id, id, faq_content, created_date, update_date, faq_response, faq_response_img, response_type, img_type) 
             VALUES 
-            (${dataset.chat_id}, '${dataset.content}', now(), now(), '${dataset.response}', '${dataset.URL}', '${dataset.type}', '${dataset.img_type}')`
+            (${dataset.chat_id}, ${dataset.id}, '${dataset.content}', now(), now(), '${dataset.response}', '${dataset.URL}', '${dataset.type}', '${dataset.img_type}')`
     
             conne.query(q, (rows) => {
                 if (rows.affectedRows !== 0) {
-                    if (dataset.type === 'img') {
-                        delAllFiles('../uploads')
-                    }
                     res.status(200).send(true)
                 } 
             })
@@ -313,6 +345,69 @@ router.post('/delFaqlist', function(req, res, next) {
     }
 })
 
+router.post('/updateFaqlist', upload.array('response_img'), function(req, res) {
+    const dataset = {
+        chat_id : req.body.chat_id,
+        response : req.body.response,
+        question : req.body.question,
+        type : req.body.response_type,
+        response_img : req.files.length > 0 ? req.files[0].filename : '',
+        image_type : req.body.img_type,
+        id: req.body.id
+    }
+    if (dataset.response_img !== '') {
+       // Create a new blob in the bucket and upload the file data.
+       const blob = bucket.file(req.files[0].originalname);
+       const blobStream = blob.createWriteStream({
+           resumable: false,
+       });
+
+       blobStream.on('error', err => {
+           next(err);
+       });
+
+       blobStream.on('finish', () => {
+           // The public URL can be used to directly access the file via HTTP.
+           const publicUrl = format(
+           `https://storage.googleapis.com/${bucket.name}/${blob.name}`
+           );
+           dataset['URL'] = publicUrl;
+           upload_content(dataset)
+       });
+
+       blobStream.end(req.files[0].buffer);
+       
+    } else {
+        upload_content(dataset)
+    }
+     
+    function upload_content(dataset) {
+        if (dataset.chat_id && dataset.question.length !== 0) {
+            const q = `
+            UPDATE 
+                aqoomchat.faq_list 
+            SET 
+                faq_content='${dataset.question}', 
+                faq_response='${dataset.response}',
+                update_date=now(), 
+                faq_response_img='${dataset.URL}', 
+                response_type='${dataset.type}', 
+                img_type='${dataset.image_type}' 
+            WHERE 
+                chat_id=${dataset.chat_id}
+                AND
+                id=${dataset.id}
+            `
+
+            conne.query(q, (rows) => {
+                if (rows.affectedRows !== 0) {
+                    res.status(200).send(true)
+                } 
+            })
+        }
+    }
+})
+
 router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, next) {
     const dataset = {
         chat_id : req.body.chat_id,
@@ -323,11 +418,27 @@ router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, n
     }
     
     if (dataset.content_img !== '') {
-        bucket.upload(req.files[0].path)
-        .then((file) => {
-            dataset['URL'] = "https://storage.googleapis.com/aqoomchatbot.appspot.com/" + file[0].id
+        // Create a new blob in the bucket and upload the file data.
+        const blob = bucket.file(req.files[0].originalname);
+        const blobStream = blob.createWriteStream({
+            resumable: false,
+        });
+
+        blobStream.on('error', err => {
+            next(err);
+        });
+
+        blobStream.on('finish', () => {
+            // The public URL can be used to directly access the file via HTTP.
+            const publicUrl = format(
+            `https://storage.googleapis.com/${bucket.name}/${blob.name}`
+            );
+            dataset['URL'] = publicUrl;
             upload_content(dataset)
-        })
+        });
+
+        blobStream.end(req.files[0].buffer);
+        
     } else {
         upload_content(dataset)
     }
@@ -370,10 +481,6 @@ router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, n
 
                 conne.query(q, (rows) => {
                     if (rows.affectedRows !== 0) {
-                        if (dataset.content_type === 'img') {
-                            delAllFiles('../uploads')
-                        }
-                        
                         res.status(200).send(true)
                     } 
                 })
@@ -395,6 +502,153 @@ router.post('/getStartMenu', function(req, res, next) {
                 res.status(200).send(rows)
             } else {
                 res.status(400)
+            }
+        })
+    }
+})
+
+router.post('/delStartMenu', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `DELETE FROM aqoomchat.start_menus WHERE chat_id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } else {
+                res.status(400).send('there is any word to be deleted. no action')
+            }
+        })
+    }
+})
+
+router.post('/getOptions', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT is_img_filter, is_block_bot, is_ordering_comeout FROM chat WHERE id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.length > 0) {
+                res.status(200).send(rows)
+            } else {
+                res.status(400)
+            }
+        })
+    }
+})
+
+router.post('/setOptions', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const img_filter = req.body.img_filter;
+    const block_bot = req.body.block_bot;
+    const order_del = req.body.order_del;
+
+    if (chat_id) {
+        const q = `UPDATE chat SET is_img_filter=${img_filter}, is_block_bot=${block_bot}, is_ordering_comeout=${order_del} WHERE id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200);
+            } else {
+                res.status(400);
+            }
+        })
+    }
+})
+
+router.post('/getMemberStatus', function(req, res) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT * FROM aqoomchat.user_chat left outer join aqoomchat.user on user_chat.user_id=user.id where chat_id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            }
+        })
+    }
+})
+
+router.post('/updateMemberChatCount', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const member_id = req.body.member_id;
+    const type = req.body.type;
+    let update_target = '';
+
+    if (type === 'txt') {
+        update_target = 'act_txt_cnt'
+    } else if (type === 'photo') {
+        update_target = 'act_photo_cnt'
+    }
+
+    if (chat_id && member_id) {
+        const q = `update aqoomchat.user_chat set ${update_target}=${update_target} + 1 where chat_id=${chat_id} and user_id=${member_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200);
+            } else {
+                res.status(400);
+            }
+        })
+    }
+})
+
+router.post('/deleteUser', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const member_id = req.body.user_id;
+
+    if (chat_id && member_id) {
+        const q = `delete from aqoomchat.user_chat where user_id=${member_id} and chat_id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+    
+})
+
+router.post('/setStateModule', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const target = req.body.target_id;
+    const status = req.body.status;
+    
+    if (chat_id) {
+        const q = `update aqoomchat.chat set module_state_${target}=${status} where id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+})
+
+router.post('/getStateModule', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `select 
+                chat.module_state_1 as module_1, 
+                chat.module_state_2 as module_2, 
+                chat.module_state_3 as module_3, 
+                chat.module_state_4 as module_4, 
+                chat.module_state_5 as module_5,
+                chat.module_state_6 as module_6
+            from 
+                aqoomchat.chat
+            where
+                id=${chat_id}
+            ;`
+        
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
             }
         })
     }
