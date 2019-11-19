@@ -1,5 +1,6 @@
 var express = require('express');
 var fs = require('fs');
+var crypto = require('crypto');
 var multer = require('multer');
 var MulterGCS = require('multer-google-storage');
 const {format} = require('util');
@@ -105,7 +106,10 @@ router.post('/checkValidation', function(req, res, next) {
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
-            const q = `UPDATE chat SET is_active=1 WHERE activation_code='${dataset.ac_code}'`
+            const crypto_ = crypto.createHash('sha1')
+            crypto_.update(Date.now().toString());
+            
+            const q = `UPDATE chat SET is_active=1, activation_code='${crypto_.digest('hex')}' WHERE activation_code='${dataset.ac_code}'`
             conne.query(q, (result) => {
                 res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
             })
