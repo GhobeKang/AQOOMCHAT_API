@@ -10,7 +10,15 @@ var router = express.Router();
 router.use(cookieParser());
 
 var DB = require('../public/javascripts/query');
-var conne = new DB('chatbot-258301:asia-northeast2:aqoomchat', 'root', 'aq@@mServ!ce', 'aqoomchat');
+
+var develop_env = 1;
+
+if (develop_env) {
+    var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
+} else {
+    var conne = new DB('chatbot-258301:asia-northeast2:aqoomchat', 'root', 'aq@@mServ!ce', 'aqoomchat');
+}
+
 if (conne) {
   console.log('connected with DB successfully');
 }
@@ -235,9 +243,9 @@ router.post('/updateWhitelist', function(req, res) {
     let q = '';
 
     if (type === 'status') {
-        q = `UPDATE aqoomchat.whitelist_url SET is_active=${data} WHERE chat_id=${chat_id} and id=${list_id};`    
+        q = `UPDATE whitelist_url SET is_active=${data} WHERE chat_id=${chat_id} and id=${list_id};`    
     } else if (type === 'content') {
-        q = `UPDATE aqoomchat.whitelist_url SET url_pattern=${data} WHERE chat_id=${chat_id} and id=${list_id};`
+        q = `UPDATE whitelist_url SET url_pattern=${data} WHERE chat_id=${chat_id} and id=${list_id};`
     }
 
     conne.query(q, (rows) => {
@@ -389,7 +397,7 @@ router.post('/updateFaqlist', upload.array('response_img'), function(req, res) {
         if (dataset.chat_id && dataset.question.length !== 0) {
             const q = `
             UPDATE 
-                aqoomchat.faq_list 
+                faq_list 
             SET 
                 faq_content='${dataset.question}', 
                 faq_response='${dataset.response}',
@@ -515,7 +523,7 @@ router.post('/delStartMenu', function(req, res) {
     const chat_id = req.body.chat_id;
 
     if (chat_id) {
-        const q = `DELETE FROM aqoomchat.start_menus WHERE chat_id=${chat_id};`
+        const q = `DELETE FROM start_menus WHERE chat_id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -566,7 +574,7 @@ router.post('/getMemberStatus', function(req, res) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
-        const q = `SELECT * FROM aqoomchat.user_chat left outer join aqoomchat.user on user_chat.user_id=user.id where chat_id=${chat_id};`
+        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.length !== 0) {
@@ -589,7 +597,7 @@ router.post('/updateMemberChatCount', function(req, res) {
     }
 
     if (chat_id && member_id) {
-        const q = `update aqoomchat.user_chat set ${update_target}=${update_target} + 1 where chat_id=${chat_id} and user_id=${member_id};`
+        const q = `update user_chat set ${update_target}=${update_target} + 1 where chat_id=${chat_id} and user_id=${member_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -606,7 +614,7 @@ router.post('/deleteUser', function(req, res) {
     const member_id = req.body.user_id;
 
     if (chat_id && member_id) {
-        const q = `delete from aqoomchat.user_chat where user_id=${member_id} and chat_id=${chat_id};`
+        const q = `delete from user_chat where user_id=${member_id} and chat_id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -623,7 +631,7 @@ router.post('/setStateModule', function(req, res) {
     const status = req.body.status;
     
     if (chat_id) {
-        const q = `update aqoomchat.chat set module_state_${target}=${status} where id=${chat_id};`
+        const q = `update chat set module_state_${target}=${status} where id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -645,7 +653,7 @@ router.post('/getStateModule', function(req, res) {
                 chat.module_state_5 as module_5,
                 chat.module_state_6 as module_6
             from 
-                aqoomchat.chat
+                chat
             where
                 id=${chat_id}
             ;`
@@ -658,4 +666,142 @@ router.post('/getStateModule', function(req, res) {
     }
 })
 
+router.post('/getQuestions', function(req, res) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `
+            select
+                message.chat_id,
+                message.text,
+                message.id,
+                message.user_id,
+                message.date,
+                message.replied_date,
+                message.reply_to_message,
+                message.reply_to_chat,
+                message.is_question,
+                user.first_name,
+                user.last_name
+            from
+                message
+                left outer join
+                user on message.user_id = user.id
+            where
+                chat_id=${chat_id}
+                and
+                is_question=1;
+        `;
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            }
+        })
+    }
+
+})
+
+router.post('/setStateReplied', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const message_id = req.body.reply_to_message_id;
+ 
+    if (chat_id && message_id) {
+        const q = `
+            update
+                message
+            set
+                replied_date = now()
+            where
+                chat_id = ${chat_id}
+                and
+                id = ${message_id}
+                and
+                is_question = 1
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+})
+
+router.post('/setInterest', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const user_id = req.body.user_id;
+    
+    if (chat_id && user_id) {
+        const q = `
+            insert into interestlist (chat_id, user_id, registered_time) values (${chat_id}, ${user_id}, now())
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+})
+
+router.post('/getInterest', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `
+            select 
+                interestlist.user_id,
+                interestlist.chat_id,
+                interestlist.registered_time,
+                message.text,
+                message.id as message_id,
+                message.date as message_date,
+                message.entities,
+                user.first_name,
+                user.last_name 
+            from 
+                interestlist 
+                left outer join
+                message on (interestlist.user_id = message.user_id and interestlist.chat_id = message.chat_id)
+                left outer join
+                user on (interestlist.user_id = user.id)
+            where 
+                interestlist.chat_id=${chat_id}
+        `
+        
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            }
+        })
+    }
+})
+
+router.post('/getInterestMembers', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `
+            select 
+                interestlist.user_id,
+                interestlist.chat_id,
+                interestlist.registered_time,
+                user.first_name,
+                user.last_name 
+            from 
+                interestlist 
+                left outer join
+                user on (interestlist.user_id = user.id)
+            where 
+                interestlist.chat_id=${chat_id}
+        `
+        
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            }
+        })
+    }
+})
 module.exports = router;

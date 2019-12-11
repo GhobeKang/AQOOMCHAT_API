@@ -3,10 +3,10 @@ var mysql = require('mysql')
 class DB_query {
     constructor(host, user, pswd, db) {
         const connection = mysql.createConnection({
+            host: host,
             user: user,
             password: pswd,
-            database: db,
-            socketPath: `/cloudsql/${host}`
+            database: db
           })
         this.connection = connection;
         
