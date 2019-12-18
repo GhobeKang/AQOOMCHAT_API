@@ -11,7 +11,7 @@ router.use(cookieParser());
 
 var DB = require('../public/javascripts/query');
 
-var develop_env = 1;
+var develop_env = 0;
 
 if (develop_env) {
     var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
@@ -562,9 +562,9 @@ router.post('/setOptions', function(req, res) {
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
-                res.status(200);
+                res.status(200).send(true);
             } else {
-                res.status(400);
+                res.status(400).send(false);
             }
         })
     }
@@ -574,7 +574,7 @@ router.post('/getMemberStatus', function(req, res) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
-        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id};`
+        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id} order by user.score;`
 
         conne.query(q, (rows) => {
             if (rows.length !== 0) {
@@ -804,4 +804,116 @@ router.post('/getInterestMembers', function(req, res) {
         })
     }
 })
+
+router.post('/getExpectedWords', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT * FROM interest_words where chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        });
+    }
+})
+
+router.post('/delExpectedWord', function(req, res) {
+    const word_id = req.body.word_id;
+    const chat_id = req.body.chat_id;
+    
+    if (word_id && chat_id) {
+        const q = `
+            DELETE FROM 
+                interest_words
+            WHERE
+                chat_id=${chat_id}
+                and
+                idx=${word_id};
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+})
+
+router.post('/pushExpectWord', function(req, res) {
+    const word = req.body.word;
+    const chat_id = req.body.chat_id;
+
+    if (word && chat_id) {
+        const q = `
+            insert into
+                interest_words
+                (
+                    word_name,
+                    chat_id,
+                    created_time,
+                    is_active
+                )
+            values 
+                (
+                    '${word}',
+                    ${chat_id},
+                    now(),
+                    1
+                )
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+})
+
+router.post('/editExpectedWord', function(req, res) {
+    const type = req.body.type;
+    const id = req.body.id;
+    const is_active = req.body.content;
+    
+    let q = '';
+
+    if (type === 'status') {
+        q = `UPDATE interest_words SET is_active='${is_active}' WHERE idx=${id} and chat_id=${req.body.chat_id};`
+    } 
+    
+    conne.query(q, (rows) => {
+        if (rows.changedRows !== 0) {
+            res.status(200).send(true)    
+        } else {
+            res.status(404).send('there is any word to be replaced. plase check a word again');
+            return false;
+        }
+    })
+})
+
+router.post('/scoreUp', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const user_id = req.body.user_id;
+    const SCORE_UP_BY_ADMIN = 20;
+    
+    const q = `
+        UPDATE user SET score = score + ${SCORE_UP_BY_ADMIN} WHERE id = ${user_id};
+    `
+    
+    conne.query(q, (rows) => {
+        if (rows.changedRows !== 0) {
+            const query_count_bonus = `UPDATE user_chat SET get_bonus=get_bonus+1 WHERE user_id=${user_id} and chat_id=${chat_id};`
+            conne.query(query_count_bonus, () => {
+                res.status(200).send(rows);
+            });
+        } else {
+            res.status(404).send(false);
+        }
+    })
+})
+
 module.exports = router;
