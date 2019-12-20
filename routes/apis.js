@@ -87,9 +87,9 @@ router.post('/getDefaultInfo', function(req, res, next) {
 router.post('/checkValidationRoom', function(req, res, next) {
     const dataset = {
         type : 'group',
-        title : req.body.title
+        id : req.body.id
     }
-    const q = `SELECT * FROM chat WHERE type='${dataset.type}' and title='${dataset.title}'`
+    const q = `SELECT * FROM chat WHERE type='${dataset.type}' and title='${dataset.id}'`
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
@@ -107,10 +107,10 @@ router.post('/checkValidationRoom', function(req, res, next) {
 router.post('/checkValidation', function(req, res, next) {
     const dataset = {
         type : 'group',
-        title : req.body.title,
+        id : req.body.id,
         ac_code: req.body.ac_code
     }
-    const q = `SELECT * FROM chat WHERE type like '%${dataset.type}%' and title='${dataset.title}' and activation_code='${dataset.ac_code}'`
+    const q = `SELECT * FROM chat WHERE type like '%${dataset.type}%' and id='${dataset.id}' and activation_code='${dataset.ac_code}'`
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
