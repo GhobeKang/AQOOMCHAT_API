@@ -11,7 +11,7 @@ router.use(cookieParser());
 
 var DB = require('../public/javascripts/query');
 
-var develop_env = 0;
+var develop_env = 1;
 
 if (develop_env) {
     var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
@@ -107,20 +107,33 @@ router.post('/checkValidationRoom', function(req, res, next) {
 router.post('/checkValidation', function(req, res, next) {
     const dataset = {
         type : 'group',
-        id : req.body.id,
-        ac_code: req.body.ac_code
+        id : req.body.id
     }
-    const q = `SELECT * FROM chat WHERE type like '%${dataset.type}%' and id='${dataset.id}' and activation_code='${dataset.ac_code}'`
+    const q = `
+        SELECT 
+            * 
+        FROM 
+            user_chat
+            left outer join
+            chat ON (user_chat.chat_id = chat.id)
+        WHERE 
+            id=${dataset.id}`
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
-            const crypto_ = crypto.createHash('sha1')
-            crypto_.update(Date.now().toString());
-            
-            const q = `UPDATE chat SET is_active=1, activation_code='${crypto_.digest('hex')}' WHERE activation_code='${dataset.ac_code}'`
-            conne.query(q, (result) => {
-                res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
+            const admin_check_q = `select user.is_admin from user where id=${dataset.id};`
+            conne.query(admin_check_q, (r) => {
+                if (r[0]) {
+                    const crypto_ = crypto.createHash('sha1')
+                    crypto_.update(Date.now().toString());
+                    
+                    const q = `UPDATE chat SET is_active=1, activation_code='${crypto_.digest('hex')}' WHERE id='${dataset.id}';`
+                    conne.query(q, (result) => {
+                        res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
+                    })
+                }
             })
+            
         } else {
             res.send(false)
         }
