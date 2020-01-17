@@ -5,6 +5,7 @@ var multer = require('multer');
 var MulterGCS = require('multer-google-storage');
 const {format} = require('util');
 var cookieParser = require('cookie-parser');
+const TelegramBot = require('node-telegram-bot-api');
 
 var router = express.Router();
 router.use(cookieParser());
@@ -15,8 +16,10 @@ var develop_env = 1;
 
 if (develop_env) {
     var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
+    var botkey = '822428347:AAGXao7qTxCL5MoqQyeSqPc7opK607fA51I';
 } else {
     var conne = new DB('chatbot-258301:asia-northeast2:aqoomchat', 'root', 'aq@@mServ!ce', 'aqoomchat');
+    var botkey = '847825836:AAFv02ESsTVjnrzIomgdiVjBGWVw7CpN_Cg';
 }
 
 if (conne) {
@@ -43,21 +46,8 @@ var storage = multer.diskStorage({
     }
   })
 var upload = new multer({storage: multer.memoryStorage()});
-
-function delAllFiles(dir) {
-    const path = require('path');
-    const rpath = path.join(__dirname, dir);
-    fs.readdir(rpath, (err, files) => {
-        if (err) throw err;
-      
-        for (const file of files) {
-          fs.unlink(path.join(rpath, file), err => {
-            if (err) throw err;
-          });
-        }
-      });
-}
-
+var bot = new TelegramBot(botkey, {polling: false});
+var schedule_msg = '';
 
 router.post('/getDefaultInfo', function(req, res, next) {
     const chat_id = req.body.chat_id;
@@ -84,26 +74,6 @@ router.post('/getDefaultInfo', function(req, res, next) {
     })
 })
 
-router.post('/checkValidationRoom', function(req, res, next) {
-    const dataset = {
-        type : 'group',
-        id : req.body.id
-    }
-    const q = `SELECT * FROM chat WHERE type='${dataset.type}' and title='${dataset.id}'`
-    
-    conne.query(q, (rows) => {
-        if (rows.length !== 0) {
-            if (rows[0].is_active) {
-                res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
-            } else {
-                res.send(false)
-            }
-        } else {
-            res.status(400).send(false)
-        }
-    });
-})
-
 router.post('/checkValidation', function(req, res, next) {
     const dataset = {
         type : 'group',
@@ -117,7 +87,9 @@ router.post('/checkValidation', function(req, res, next) {
             left outer join
             chat ON (user_chat.chat_id = chat.id)
         WHERE 
-            id=${dataset.id}`
+            user_chat.user_id=${dataset.id}
+            and
+            chat.type like '%${dataset.type}%'`
     
     conne.query(q, (rows) => {
         if (rows.length !== 0) {
@@ -127,9 +99,13 @@ router.post('/checkValidation', function(req, res, next) {
                     const crypto_ = crypto.createHash('sha1')
                     crypto_.update(Date.now().toString());
                     
-                    const q = `UPDATE chat SET is_active=1, activation_code='${crypto_.digest('hex')}' WHERE id='${dataset.id}';`
+                    const q = `UPDATE chat SET is_active=1, activation_code='${crypto_.digest('hex')}' WHERE id='${rows[0].chat_id}';`
                     conne.query(q, (result) => {
-                        res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: rows[0].id})
+                        let chat_id_arr = [];
+                        for (var item of rows) {
+                            chat_id_arr.push(item.chat_id)
+                        }
+                        res.cookie('living', '1', { expires: new Date(Date.now() + 7200000)}).send({id: chat_id_arr})
                     })
                 }
             })
@@ -927,6 +903,27 @@ router.post('/scoreUp', function(req, res) {
             res.status(404).send(false);
         }
     })
+})
+
+router.post('/setSchedule', function(req, res) {
+    schedule_msg = setInterval(function() {
+        const current_time = Date.now();
+        const period_time = new Date(req.body.period)
+        if (current_time > period_time) {
+            clearInterval(schedule_msg);
+            return false;
+        }
+        
+        bot.sendMessage(req.body.chat_id, req.body.content);
+    }, req.body.interval * 1000)
+
+    res.send(true);
+})
+
+router.post('/unsetSchedule', function(req, res) {
+    clearInterval(schedule_msg);
+
+    res.send(true);
 })
 
 module.exports = router;
