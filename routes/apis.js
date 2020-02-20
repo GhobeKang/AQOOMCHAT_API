@@ -12,7 +12,7 @@ router.use(cookieParser());
 
 var DB = require('../public/javascripts/query');
 
-var develop_env = 1;
+var develop_env = 0;
 
 if (develop_env) {
     var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
@@ -563,7 +563,22 @@ router.post('/getMemberStatus', function(req, res) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
-        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id} order by user.score;`
+        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id} order by user_chat.is_interested, user.score;`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            }
+        })
+    }
+})
+
+router.post('/getMember', function(req, res) {
+    const member_id = req.body.member_id;
+    const chat_id = req.body.chat_id;
+    
+    if (member_id && chat_id ) {
+        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where user_id=${member_id} and chat_id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.length !== 0) {
@@ -655,41 +670,6 @@ router.post('/getStateModule', function(req, res) {
     }
 })
 
-router.post('/getQuestions', function(req, res) {
-    const chat_id = req.body.chat_id;
-    
-    if (chat_id) {
-        const q = `
-            select
-                message.chat_id,
-                message.text,
-                message.id,
-                message.user_id,
-                message.date,
-                message.replied_date,
-                message.reply_to_message,
-                message.reply_to_chat,
-                message.is_question,
-                user.first_name,
-                user.last_name
-            from
-                message
-                left outer join
-                user on message.user_id = user.id
-            where
-                chat_id=${chat_id}
-                and
-                is_question=1;
-        `;
-
-        conne.query(q, (rows) => {
-            if (rows.length !== 0) {
-                res.send(rows)
-            }
-        })
-    }
-
-})
 
 router.post('/setStateReplied', function(req, res) {
     const chat_id = req.body.chat_id;
@@ -720,75 +700,18 @@ router.post('/setStateReplied', function(req, res) {
 router.post('/setInterest', function(req, res) {
     const chat_id = req.body.chat_id;
     const user_id = req.body.user_id;
-    
+    const val = req.body.val;
+
     if (chat_id && user_id) {
         const q = `
-            insert into interestlist (chat_id, user_id, registered_time) values (${chat_id}, ${user_id}, now())
+            update user_chat set is_interested=${val} where user_id=${user_id} and chat_id=${chat_id}
         `
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
                 res.status(200).send(true)
-            } 
-        })
-    }
-})
-
-router.post('/getInterest', function(req, res) {
-    const chat_id = req.body.chat_id;
-
-    if (chat_id) {
-        const q = `
-            select 
-                interestlist.user_id,
-                interestlist.chat_id,
-                interestlist.registered_time,
-                message.text,
-                message.id as message_id,
-                message.date as message_date,
-                message.entities,
-                user.first_name,
-                user.last_name 
-            from 
-                interestlist 
-                left outer join
-                message on (interestlist.user_id = message.user_id and interestlist.chat_id = message.chat_id)
-                left outer join
-                user on (interestlist.user_id = user.id)
-            where 
-                interestlist.chat_id=${chat_id}
-        `
-        
-        conne.query(q, (rows) => {
-            if (rows.length !== 0) {
-                res.send(rows)
-            }
-        })
-    }
-})
-
-router.post('/getInterestMembers', function(req, res) {
-    const chat_id = req.body.chat_id;
-
-    if (chat_id) {
-        const q = `
-            select 
-                interestlist.user_id,
-                interestlist.chat_id,
-                interestlist.registered_time,
-                user.first_name,
-                user.last_name 
-            from 
-                interestlist 
-                left outer join
-                user on (interestlist.user_id = user.id)
-            where 
-                interestlist.chat_id=${chat_id}
-        `
-        
-        conne.query(q, (rows) => {
-            if (rows.length !== 0) {
-                res.send(rows)
+            } else {
+                res.send(false)
             }
         })
     }
@@ -884,27 +807,6 @@ router.post('/editExpectedWord', function(req, res) {
     })
 })
 
-router.post('/scoreUp', function(req, res) {
-    const chat_id = req.body.chat_id;
-    const user_id = req.body.user_id;
-    const SCORE_UP_BY_ADMIN = 20;
-    
-    const q = `
-        UPDATE user SET score = score + ${SCORE_UP_BY_ADMIN} WHERE id = ${user_id};
-    `
-    
-    conne.query(q, (rows) => {
-        if (rows.changedRows !== 0) {
-            const query_count_bonus = `UPDATE user_chat SET get_bonus=get_bonus+1 WHERE user_id=${user_id} and chat_id=${chat_id};`
-            conne.query(query_count_bonus, () => {
-                res.status(200).send(rows);
-            });
-        } else {
-            res.status(404).send(false);
-        }
-    })
-})
-
 router.post('/setSchedule', function(req, res) {
     schedule_msg = setInterval(function() {
         const current_time = Date.now();
@@ -924,6 +826,314 @@ router.post('/unsetSchedule', function(req, res) {
     clearInterval(schedule_msg);
 
     res.send(true);
+})
+
+router.post('/getMessageCntPerDay', function(req, res) {
+    const member_id = req.body.member_id;
+    const chat_id = req.body.chat_id;
+    
+    if (member_id && chat_id) {
+        const q = `select concat(cast(monthname(date) as char(3)),' ', day(date)) as ym, count(*) as cnt from message where chat_id=${chat_id} and user_id=${member_id} group by ym;`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })    
+    }
+})
+
+router.post('/getMessageCntPerHour', function(req, res) {
+    const member_id = req.body.member_id;
+    const chat_id = req.body.chat_id;
+    
+    if (member_id && chat_id) {
+        const q = `select hour(date) as hour, count(*) as cnt from message where chat_id=${chat_id} and user_id=${member_id} and date > curdate() - interval 1 day group by hour(date)`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })    
+    }
+})
+
+router.post('/getMessageByUser', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const user_id = req.body.member_id;
+    const until_when = req.body.date;
+
+    if (chat_id && user_id) {
+        const q = `
+            select 
+                message.chat_id,
+                message.text,
+                message.photo,
+                message.sticker,
+                message.video,
+                message.audio,
+                message.entities,
+                message.id,
+                message.user_id,
+                message.date,
+                message.replied_date,
+                message.reply_to_message,
+                message.reply_to_chat,
+                message.is_question,
+                user.first_name,
+                user.last_name,
+                user.username
+            from
+                message
+                left outer join
+                user on message.user_id = user.id 
+            where
+                chat_id=${chat_id}
+                and
+                user_id=${user_id}
+                and
+                date > curdate() - interval ${until_when} day
+            order by date desc
+        `
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/getMessageById', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const message_id = req.body.message_id;
+
+    if (chat_id && message_id) {
+        const q = `
+            select
+                message.chat_id,
+                message.text,
+                message.photo,
+                message.sticker,
+                message.video,
+                message.audio,
+                message.entities,
+                message.id,
+                message.user_id,
+                message.date,
+                message.replied_date,
+                message.reply_to_message,
+                message.reply_to_chat,
+                message.is_question,
+                user.first_name,
+                user.last_name,
+                user.username
+            from
+                message
+                left outer join
+                user on message.user_id = user.id 
+            where 
+                chat_id=${chat_id}
+                and
+                message.id=${message_id}
+            `
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/getMessages', function(req, res) {
+    const page = req.body.page;
+    const limit = page * 20
+    const chat_id = req.body.chat_id;
+    
+    if (limit !== undefined && chat_id) {
+        const q = `
+        select
+            message.chat_id,
+            message.text,
+            message.photo,
+            message.sticker,
+            message.video,
+            message.audio,
+            message.entities,
+            message.id,
+            message.user_id,
+            message.date,
+            message.replied_date,
+            message.reply_to_message,
+            message.reply_to_chat,
+            message.is_question,
+            user.first_name,
+            user.last_name,
+            user.username
+        from
+            message
+            left outer join
+            user on message.user_id = user.id 
+        where 
+            chat_id=${chat_id}
+        order by date desc
+        limit ${limit}, 20`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })  
+    }
+})
+
+router.post('/getQuestions', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const cr_page = req.body.page;
+    const limit = cr_page * 20;
+
+    if (chat_id) {
+        const q = `
+            select
+                message.chat_id,
+                message.text,
+                message.photo,
+                message.sticker,
+                message.video,
+                message.audio,
+                message.entities,
+                message.id,
+                message.user_id,
+                message.date,
+                message.replied_date,
+                message.reply_to_message,
+                message.reply_to_chat,
+                message.is_question,
+                user.first_name,
+                user.last_name,
+                user.username
+            from
+                message
+                left outer join
+                user on message.user_id = user.id
+            where
+                chat_id=${chat_id}
+                and
+                is_question=1
+            order by date desc
+            limit ${limit}, 20;
+        `;
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })
+    }
+
+})
+
+router.post('/removeMessage', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const message_id = req.body.message_id;
+
+    if (chat_id && message_id) {
+        const q = `delete from telegram_update where chat_id=${chat_id} and message_id=${message_id}; 
+                    delete from message where chat_id=${chat_id} and id=${message_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } 
+        })
+    }
+    
+})
+
+router.post('/searchMember', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const query = req.body.query;
+    
+    if (chat_id && query.length > 0) {
+        const q = `
+        select 
+            * 
+        from 
+            user_chat 
+            left outer join 
+            user on (user_chat.user_id = user.id) 
+        where 
+            chat_id=${chat_id} 
+            and 
+            (first_name like '%${query}%' 
+            or 
+            last_name like '%${query}%')`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })
+    }
+})
+
+router.post('/getAdminMentions', function(req, res) {
+    const chat_id = req.body.chat_id
+    const page = req.body.page;
+    const limit = page * 20;
+
+    if (chat_id) {
+        const q = `
+        select
+            message.chat_id,
+            message.text,
+            message.photo,
+            message.sticker,
+            message.video,
+            message.audio,
+            message.entities,
+            message.id,
+            message.user_id,
+            message.date,
+            message.replied_date,
+            message.reply_to_message,
+            message.reply_to_chat,
+            message.is_question,
+            user.first_name,
+            user.last_name,
+            user.username
+        from
+            message
+            left outer join
+            user on message.user_id = user.id
+        where 
+            chat_id=${chat_id}
+            and
+            is_mention=1
+        order by date desc
+        limit ${limit}, 20;`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows)
+            } else {
+                res.send(false)
+            }
+        })
+    }
 })
 
 module.exports = router;

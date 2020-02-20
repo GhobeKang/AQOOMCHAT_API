@@ -6,8 +6,9 @@ class DB_query {
             user: user,
             password: pswd,
             database: db,
-            // socketPath: `/cloudsql/${host}`,
-            host: host
+            socketPath: `/cloudsql/${host}`,
+            // host: host,
+            multipleStatements: true
           })
         this.connection = connection;
         
