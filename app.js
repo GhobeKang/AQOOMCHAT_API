@@ -20,7 +20,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(cors({ credentials: true, origin: true }));
+app.all('/*', function(req, res, next) {
+  const origin_url = req.get('Origin');
+  if (origin_url === 'https://aqoom.chat' || origin_url === 'https://fd23ca2b.ngrok.io') {
+    res.header('Access-Control-Allow-Origin', origin_url);
+  }
+  
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  next();
+});
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/static',express.static('uploads'));
 

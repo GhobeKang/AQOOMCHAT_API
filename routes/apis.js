@@ -1,11 +1,10 @@
 var express = require('express');
-var fs = require('fs');
 var crypto = require('crypto');
 var multer = require('multer');
-var MulterGCS = require('multer-google-storage');
 const {format} = require('util');
 var cookieParser = require('cookie-parser');
 const TelegramBot = require('node-telegram-bot-api');
+const cron = require('node-cron');
 
 var router = express.Router();
 router.use(cookieParser());
@@ -15,10 +14,10 @@ var DB = require('../public/javascripts/query');
 var develop_env = 0;
 
 if (develop_env) {
-    var conne = new DB('localhost', 'root', 'term!ner1', 'aqoom');
+    var conne = new DB('34.97.24.74', 'root', 'aq@@mServ!ce', 'aqoomchat');
     var botkey = '822428347:AAGXao7qTxCL5MoqQyeSqPc7opK607fA51I';
 } else {
-    var conne = new DB('chatbot-258301:asia-northeast2:aqoomchat', 'root', 'aq@@mServ!ce', 'aqoomchat');
+    var conne = new DB('34.97.24.74', 'root', 'aq@@mServ!ce', 'aqoomchat');
     var botkey = '847825836:AAFv02ESsTVjnrzIomgdiVjBGWVw7CpN_Cg';
 }
 
@@ -47,7 +46,7 @@ var storage = multer.diskStorage({
   })
 var upload = new multer({storage: multer.memoryStorage()});
 var bot = new TelegramBot(botkey, {polling: false});
-var schedule_msg = '';
+var schedule_msg = [];
 
 router.post('/getDefaultInfo', function(req, res, next) {
     const chat_id = req.body.chat_id;
@@ -142,16 +141,17 @@ router.post('/pushWordData', function(req, res, next) {
 })
 
 router.post('/delWordData', function(req, res, next) {
-    if (!req.body.word) {
-        res.status(404).send('there is no valid query string. you must involve it to get a query result')
+    if (!req.body.id) {
+        res.status(404).send('parameter was missing.')
         return false;
     }
-    const q = `DELETE FROM forb_wordlist WHERE word_name='${req.body.word}' and chat_id=${req.body.chat_id};`
+
+    const q = `DELETE FROM forb_wordlist WHERE id='${req.body.id}' and chat_id=${req.body.chat_id};`
     conne.query(q, (rows) => {
         if (rows.affectedRows !== 0) {
             res.status(200).send(true)
         } else {
-            res.status(400).send('there is any word to be deleted. no action')
+            res.status(200).send(false)
         }
     })
 })
@@ -208,17 +208,17 @@ router.post('/pushWhitelist', function(req, res, next) {
 })
 
 router.post('/delWhitelist', function(req, res, next) {
-    const data = req.body.url;
+    const whitelist_id = req.body.id;
     const chat_id = req.body.chat_id;
 
     if (chat_id) {
-        const q = `DELETE FROM whitelist_url WHERE url_pattern='${data}' AND chat_id=${chat_id}`
+        const q = `DELETE FROM whitelist_url WHERE id='${whitelist_id}' AND chat_id=${chat_id}`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
                 res.status(200).send(true)
             } else {
-                res.status(400).send('there is any word to be deleted. no action')
+                res.status(200).send(false)
             }
         })
     }
@@ -264,11 +264,14 @@ router.post('/pushFaqlist', upload.array('response_img'), function(req, res, nex
     const dataset = {
         chat_id : req.body.chat_id,
         response : req.body.response,
-        content : req.body.content,
+        content : req.body.keyword,
         type : req.body.response_type,
         response_img : req.files.length > 0 ? req.files[0].filename : '',
         image_type : req.body.img_type,
-        id: Math.floor((Math.random() * 100000) + 1)
+        id: req.body.id || Math.floor((Math.random() * 100000) + 1),
+        keyword_type: req.body.keyword_type,
+        inline_btns: req.body.inline_btns,
+        onEditing: req.body.onEditing
     }
     
     if (dataset.response_img !== '') {
@@ -298,12 +301,22 @@ router.post('/pushFaqlist', upload.array('response_img'), function(req, res, nex
     }
      
     function upload_content(dataset) {
-        if (dataset.chat_id && dataset.content.length !== 0) {
+        if (dataset.chat_id && dataset.content.length !== 0 && dataset.onEditing == 0) {
             const q = `INSERT INTO faq_list 
-            (chat_id, id, faq_content, created_date, update_date, faq_response, faq_response_img, response_type, img_type) 
+            (chat_id, id, faq_content, created_date, update_date, faq_response, faq_response_img, response_type, img_type, keyword_type, buttons) 
             VALUES 
-            (${dataset.chat_id}, ${dataset.id}, '${dataset.content}', now(), now(), '${dataset.response}', '${dataset.URL}', '${dataset.type}', '${dataset.img_type}')`
+            (${dataset.chat_id}, ${dataset.id}, '${dataset.content}', now(), now(), '${dataset.response}', '${dataset.URL}', '${dataset.type}', '${dataset.img_type}', ${dataset.keyword_type}, '${dataset.inline_btns}')`
     
+            conne.query(q, (rows) => {
+                if (rows.affectedRows !== 0) {
+                    res.status(200).send(true)
+                } 
+            })
+        } else if (dataset.chat_id && dataset.onEditing == 1 && dataset.id) {
+            const q = `
+                UPDATE faq_list SET faq_content='${dataset.content}', update_date=now(), faq_response='${dataset.response}', faq_response_img='${dataset.URL}', response_type='${dataset.type}', img_type='${dataset.img_type}', keyword_type=${dataset.keyword_type}, buttons='${dataset.inline_btns}' WHERE id=${dataset.id} and chat_id=${dataset.chat_id}
+            `
+
             conne.query(q, (rows) => {
                 if (rows.affectedRows !== 0) {
                     res.status(200).send(true)
@@ -330,11 +343,11 @@ router.post('/getFaqlist', function(req, res, next) {
 })
 
 router.post('/delFaqlist', function(req, res, next) {
-    const data = req.body.content;
+    const faq_id = req.body.id;
     const chat_id = req.body.chat_id;
 
     if (chat_id) {
-        const q = `DELETE FROM faq_list WHERE faq_content='${data}' AND chat_id=${chat_id}`
+        const q = `DELETE FROM faq_list WHERE id=${faq_id} AND chat_id=${chat_id}`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -415,7 +428,8 @@ router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, n
         content_txt : req.body.content_text,
         content_img : req.files.length > 0 ? req.files[0].filename : '',
         content_type : req.body.content_type,
-        image_type : req.body.img_type
+        image_type : req.body.img_type,
+        inline_btns: req.body.inline_btns
     }
     
     if (dataset.content_img !== '') {
@@ -443,56 +457,54 @@ router.post('/pushStartMenu',  upload.array('content_img'), function(req, res, n
     } else {
         upload_content(dataset)
     }
-
-    async function check_validation_for_exists(chat_id, callback) {
-        if (chat_id) {
-            const q = `SELECT count(*) FROM start_menus WHERE chat_id=${chat_id}`
-            
-            conne.query(q, (count) => {
-                if (count[0]['count(*)'] !== 0) {
-                    if (typeof callback === 'function') {
-                        return callback(true)
-                    }
-                } else {
-                    if (typeof callback === 'function') {
-                        return callback(false)
-                    }
-                }
-            })
-        }
-    }
     
     function upload_content (dataset) {
-        if (dataset.chat_id) {
-            check_validation_for_exists(dataset.chat_id, (check_validation) => {
-                var q = ''
-                if (check_validation) {
-                    q = `UPDATE start_menus 
-                    SET 
-                        content_txt='${dataset.content_txt}', content_img='${dataset.URL}', img_type='${dataset.image_type}', response_type='${dataset.content_type}', update_date=now()
-                    WHERE
-                        chat_id=${dataset.chat_id};`
-                    
-                } else {
-                    q = `INSERT INTO start_menus 
-                    (chat_id, content_txt, content_img, img_type, response_type, created_date, update_date) 
-                    VALUES 
-                    (${dataset.chat_id}, '${dataset.content_txt}', '${dataset.URL}', '${dataset.image_type}', '${dataset.content_type}', now(), now());`
-                }
+        if (dataset.chat_id && !req.body.id) {
+            var q = `
+            UPDATE start_menus SET is_active=0 WHERE chat_id=${dataset.chat_id};
+            INSERT INTO start_menus 
+            (chat_id, content_txt, content_img, img_type, response_type, created_date, update_date, is_active, buttons) 
+            VALUES 
+            (${dataset.chat_id}, '${dataset.content_txt}', '${dataset.URL}', '${dataset.image_type}', '${dataset.content_type}', now(), now(), 1, '${dataset.inline_btns}');`
 
-                conne.query(q, (rows) => {
-                    if (rows.affectedRows !== 0) {
-                        res.status(200).send(true)
-                    } 
-                })
+            conne.query(q, (rows) => {
+                if (rows.affectedRows !== 0) {
+                    res.status(200).send(true)
+                } 
             })
+        } else if (req.body.id && dataset.chat_id) {
+            var q = `
+                UPDATE start_menus SET is_active=0 WHERE chat_id=${dataset.chat_id};
+                UPDATE start_menus SET is_active=1, content_txt='${dataset.content_txt}', content_img='${dataset.content_img}', img_type='${dataset.image_type}', update_date=now(), buttons='${dataset.inline_btns}' WHERE chat_id=${dataset.chat_id} and id=${req.body.id};
+            `
 
+            conne.query(q, (rows) => {
+                if (rows.affectedRows !== 0) {
+                    res.status(200).send(true)
+                } 
+            })
         }
     }
 
 })
 
 router.post('/getStartMenu', function(req, res, next) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `SELECT * FROM start_menus WHERE chat_id=${chat_id} and is_active=1`
+
+        conne.query(q, (rows) => {
+            if (rows.length > 0) {
+                res.status(200).send(rows)
+            } else {
+                res.status(400)
+            }
+        })
+    }
+})
+
+router.post('/getStartMenuAll', function(req, res, next) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
@@ -510,9 +522,10 @@ router.post('/getStartMenu', function(req, res, next) {
 
 router.post('/delStartMenu', function(req, res) {
     const chat_id = req.body.chat_id;
+    const welcome_id = req.body.id;
 
     if (chat_id) {
-        const q = `DELETE FROM start_menus WHERE chat_id=${chat_id};`
+        const q = `DELETE FROM start_menus WHERE chat_id=${chat_id} and id=${welcome_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -563,7 +576,7 @@ router.post('/getMemberStatus', function(req, res) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
-        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id} order by user_chat.is_interested, user.score;`
+        const q = `SELECT * FROM user_chat left outer join user on user_chat.user_id=user.id where chat_id=${chat_id} order by user_chat.is_interested desc, user.score desc;`
 
         conne.query(q, (rows) => {
             if (rows.length !== 0) {
@@ -686,7 +699,11 @@ router.post('/setStateReplied', function(req, res) {
                 and
                 id = ${message_id}
                 and
-                is_question = 1
+                (
+                    is_question = 1
+                    or
+                    is_mention = 1
+                )
         `
 
         conne.query(q, (rows) => {
@@ -805,27 +822,6 @@ router.post('/editExpectedWord', function(req, res) {
             return false;
         }
     })
-})
-
-router.post('/setSchedule', function(req, res) {
-    schedule_msg = setInterval(function() {
-        const current_time = Date.now();
-        const period_time = new Date(req.body.period)
-        if (current_time > period_time) {
-            clearInterval(schedule_msg);
-            return false;
-        }
-        
-        bot.sendMessage(req.body.chat_id, req.body.content);
-    }, req.body.interval * 1000)
-
-    res.send(true);
-})
-
-router.post('/unsetSchedule', function(req, res) {
-    clearInterval(schedule_msg);
-
-    res.send(true);
 })
 
 router.post('/getMessageCntPerDay', function(req, res) {
@@ -1131,6 +1127,280 @@ router.post('/getAdminMentions', function(req, res) {
                 res.send(rows)
             } else {
                 res.send(false)
+            }
+        })
+    }
+})
+
+router.post('/setAnnounce', upload.array('content_img'), function(req, res) {
+    const chat_id = req.body.chat_id;
+    const schedule_id = Math.floor(Math.random() * 1000000);
+
+    if (chat_id) {
+        let message_content = req.body.content;
+
+        if (!req.body.content_type) {
+             // Create a new blob in the bucket and upload the file data.
+            const blob = bucket.file(req.files[0].originalname);
+            const blobStream = blob.createWriteStream({
+                resumable: false,
+            });
+
+            blobStream.on('error', err => {
+                next(err);
+            });
+
+            blobStream.on('finish', () => {
+                // The public URL can be used to directly access the file via HTTP.
+                const publicUrl = format(
+                `https://storage.googleapis.com/${bucket.name}/${blob.name}`
+                );
+                message_content = publicUrl;
+            });
+
+            blobStream.end(req.files[0].buffer);
+        }
+
+        const q = `
+            replace into chat_announcement (chat_id, schedule_id, schedule_type, content, schedule_month, schedule_dayofmonth, schedule_dayofweek, schedule_hour, schedule_min)
+            values (
+                ${req.body.chat_id},
+                ${schedule_id},
+                '${req.body.type}',
+                '${message_content}',
+                ${req.body.month ? req.body.month : null},
+                ${req.body.monthofday ? req.body.monthofday : null},
+                ${req.body.weekofday ? req.body.weekofday : null},
+                ${req.body.hour},
+                ${req.body.min}
+            )
+        `
+        const q_timezone = `select chat_timezone.timezone as timezone from chat_timezone where chat_id=${chat_id}`;
+
+        conne.query(q_timezone, (result) => {
+            let tz = '';
+
+            if (result.length !== 0) {
+                console.log(result[0].timezone)
+                tz = JSON.parse(result[0].timezone);
+                tz = tz[0];
+            } else {
+                tz = 'America/New_York';
+            }
+
+            const scheduleTask = cron.schedule(`
+                ${req.body.min} 
+                ${req.body.hour} 
+                ${req.body.monthofday ? req.body.monthofday : '*'} 
+                ${req.body.month ? req.body.month : '*'} 
+                ${req.body.weekofday ? req.body.weekofday : '*'}`, () => {
+                    if (req.body.content_type) {
+                        bot.sendMessage(req.body.chat_id, message_content)
+                    } else {
+                        bot.sendPhoto(req.body.chat_id, message_content)
+                    }
+                }, {
+                    timezone: tz,
+                    scheduled: false
+                })
+            
+            schedule_msg[schedule_id] = scheduleTask;
+
+            schedule_msg[schedule_id].start()
+        })
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                const dataset = {
+                    content: message_content,
+                    schedule_id: schedule_id
+                }
+                res.status(200).send(dataset)
+            } 
+        }) 
+    }
+})
+
+router.post('/getAnnounce', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `
+            SELECT * FROM chat_announcement WHERE chat_id = ${chat_id}
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/delAnnounce', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const id = req.body.ann_id;
+
+    if (chat_id && id) {
+        const q = `DELETE FROM chat_announcement WHERE chat_id=${chat_id} and schedule_id=${id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                schedule_msg[id].stop();
+                res.status(200).send(true)
+            } else {
+                res.status(400).send('there is any word to be deleted. no action')
+            }
+        })
+    }
+})
+
+router.post('/getAnti', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `SELECT * FROM anti_spam_options WHERE chat_id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/updateAnti', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const target_field = req.body.field;
+
+    if (chat_id) {
+        const q = `UPDATE anti_spam_options SET ${target_field}=1 WHERE chat_id=${chat_id};`
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } else {
+                res.status(400).send('there is any word to be deleted. no action')
+            }
+        })
+    }
+})
+
+router.post('/setTimezone', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const offset = req.body.offset;
+    const timezones = req.body.timezone;
+    const pos = req.body.position;
+    
+    if (chat_id && offset) {
+        const q = `
+            replace into chat_timezone (id, chat_id, timezone, offset, tz_pos) values (${Math.floor(Math.random() * 10000 + 1)}, ${chat_id}, '${timezones}', ${offset}, ${pos})
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(timezones)
+            } else {
+                const default_val = {
+                    timezone: 'America/New_York',
+                    offset: -4
+                }
+                res.status(200).send(default_val)
+            }
+        }) 
+
+    }
+})
+
+router.post('/getTimezone', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `SELECT * FROM chat_timezone WHERE chat_id=${chat_id}`
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/updateStateSlashs', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const status = req.body.status;
+    
+    if (chat_id) {
+        const q = `UPDATE anti_spam_options SET anti_slash=${status} WHERE chat_id=${chat_id}`;
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true)
+            } else {
+                res.status(200).send(false)
+            }
+        }) 
+    }
+})
+
+router.post('/getUserWhitelist', function(req, res) {
+    const chat_id = req.body.chat_id;
+    
+    if (chat_id) {
+        const q = `
+            SELECT 
+                user_whitelist.id,
+                user_whitelist.username
+            FROM 
+                user_whitelist
+            WHERE 
+                chat_id=${chat_id}`;
+
+        conne.query(q, (rows) => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else {
+                res.send(false);
+            }
+        })
+    }
+})
+
+router.post('/setUserWhitelist', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const username = req.body.username;
+    
+    if (chat_id && username) {
+        const q = `REPLACE INTO user_whitelist (chat_id, username) VALUES (${chat_id}, '${username}');`;
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true);
+            } else {
+                res.status(200).send(false);
+            }
+        })
+    }
+})
+
+router.post('/delWhiteUser', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const id = req.body.id;
+
+    if (chat_id) {
+        const q = `DELETE FROM user_whitelist WHERE chat_id=${chat_id} and id=${id}`;
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.status(200).send(true);
+            } else {
+                res.status(200).send(false);
             }
         })
     }

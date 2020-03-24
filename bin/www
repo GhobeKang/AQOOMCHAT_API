@@ -5,15 +5,29 @@
  */
 
 var app = require('../app');
-var https = require('https')
 var debug = require('debug')('chatbot-server:server');
 var fs = require('fs');
+// var https = require('https')
+// var greenlock = require('greenlock-express');
 var http = require('http');
 
 const options = {
   key: fs.readFileSync(__dirname + '/../server.key'),
   cert: fs.readFileSync(__dirname + '/../server.cert')
 };
+
+// const lex = greenlock.init({
+//   packageRoot: __dirname + '/../',
+
+//   // contact for security and critical bug notices
+//   configDir: "./greenlock.d",
+//   maintainerEmail: "vance.kang@aqoom.com",
+//   // whether or not to run at cloudscale
+//   cluster: false
+// })
+// // Serves on 80 and 443
+// // Get's SSL certificates magically!
+// .serve(app);
 
 /**
  * Get port from environment and store in Express.
@@ -25,7 +39,8 @@ app.set('port', port);
 /**
  * Create HTTP server.
  */
-// var server = https.createServer(options, app);
+// var server = https.createServer(lex., app);
+// https.createServer(lex.httpsOptions, lex.middleware(app)).listen(process.env.SSL_PORT || 443);
 var server = http.createServer(app);
 
 /**
