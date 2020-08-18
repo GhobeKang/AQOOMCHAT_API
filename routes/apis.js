@@ -537,11 +537,11 @@ router.post('/delStartMenu', function(req, res) {
     }
 })
 
-router.post('/getOptions', function(req, res, next) {
+router.post('/getRestriction', function(req, res, next) {
     const chat_id = req.body.chat_id;
     
     if (chat_id) {
-        const q = `SELECT is_img_filter, is_block_bot, is_ordering_comeout FROM chat WHERE id=${chat_id}`
+        const q = `SELECT is_block_bot, is_block_invite, is_restrict_new_member FROM chat WHERE id=${chat_id}`
 
         conne.query(q, (rows) => {
             if (rows.length > 0) {
@@ -553,20 +553,26 @@ router.post('/getOptions', function(req, res, next) {
     }
 })
 
-router.post('/setOptions', function(req, res) {
+router.post('/setRestriction', function(req, res) {
     const chat_id = req.body.chat_id;
-    const img_filter = req.body.img_filter;
-    const block_bot = req.body.block_bot;
-    const order_del = req.body.order_del;
+    const restrictions = req.body.restrictions;
+
+    const block_bot = restrictions.bot;
+    const block_invite = restrictions.invite;
+    const restrict_new_member = restrictions.new_member;
 
     if (chat_id) {
-        const q = `UPDATE chat SET is_img_filter=${img_filter}, is_block_bot=${block_bot}, is_ordering_comeout=${order_del} WHERE id=${chat_id};`
+        const q = `UPDATE chat SET is_block_bot=${block_bot !== undefined ? block_bot : 'is_block_bot'}, 
+            is_block_invite=${block_invite !== undefined ? block_invite : 'is_block_invite'}, 
+            is_restrict_new_member=${restrict_new_member !== undefined ? restrict_new_member : 'is_restrict_new_member'} 
+            WHERE 
+            id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
                 res.status(200).send(true);
             } else {
-                res.status(400).send(false);
+                res.status(200).send(false);
             }
         })
     }
@@ -1136,9 +1142,18 @@ router.post('/setAnnounce', upload.array('content_img'), function(req, res) {
     const chat_id = req.body.chat_id;
     const schedule_id = Math.floor(Math.random() * 1000000);
 
-    if (chat_id) {
-        let message_content = req.body.content;
+    function escapeHtml(unsafe) {
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+     }
 
+    if (chat_id) {
+        let message_content = escapeHtml(req.body.content);
+        
         if (!req.body.content_type) {
              // Create a new blob in the bucket and upload the file data.
             const blob = bucket.file(req.files[0].originalname);
@@ -1406,4 +1421,171 @@ router.post('/delWhiteUser', function(req, res) {
     }
 })
 
+router.post('/getAnalysticData', function(req, res) {
+    const chat_id = req.body.chat_id;
+    let date_from = req.body.date_from;
+    let date_to = req.body.date_to;
+
+    if (chat_id) {
+        if (date_to === 'today') {
+            const today = new Date(Date.now());
+            
+            date_to = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+        }
+        const q_total = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} group by ym`;
+        const q_text = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and text IS NOT NULL group by ym`;
+        const q_question = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and is_question=1 group by ym`;
+        const q_media = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and (audio IS NOT NULL or video IS NOT NULL or photo IS NOT NULL or sticker IS NOT NULL or voice IS NOT NULL) group by ym`;
+        const q_forward = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and forward_from IS NOT NULL group by ym`;
+
+        let result_rows, result_rows_text, result_rows_question, result_rows_media, result_rows_forward;
+
+        conne.query(q_total, rows => {
+            if (rows.length !== 0) {
+                result_rows = rows;
+                conne.query(q_text, rows_text => {
+                    result_rows_text = rows_text;
+                    conne.query(q_question, rows_question => {
+                        result_rows_question = rows_question;
+                        conne.query(q_media, rows_media => {
+                            result_rows_media = rows_media;
+                            conne.query(q_forward, rows_forward => {
+                                res.send({
+                                    total : result_rows,
+                                    text: result_rows_text,
+                                    question: result_rows_question,
+                                    media: result_rows_media,
+                                    forward: rows_forward
+                                });
+                            })
+                        })
+                    })
+                })
+            } else {
+                res.send([]);
+            }
+        })
+    }
+})
+
+router.post('/getInactiveUsers', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q_join = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date > curdate() - interval 12 day and chat_id=${chat_id} and new_chat_members IS NOT NULL group by ym`;
+        
+        conne.query(q_join, rows_join => {
+            res.send(rows_join);
+        })
+    }
+})
+
+router.post('/getAnalysticCommunityMember', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q_join = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date > curdate() - interval 12 day and chat_id=${chat_id} and new_chat_members IS NOT NULL group by ym`;
+        const q_left = `SELECT concat(cast(monthname(date) as char(3)),' ', IF(LENGTH(day(date)) = 1, concat('0', day(date)), day(date))) as ym, count(*) as cnt FROM message WHERE date > curdate() - interval 12 day and chat_id=${chat_id} and left_chat_member IS NOT NULL group by ym`;
+
+        let result = [];
+
+        conne.query(q_join, rows => {
+            if (rows.length !== 0) {
+                result.new = rows;
+                conne.query(q_left, rows_left => {
+                    if (rows_left.length !== 0) {
+                        result.left = rows_left;
+                        res.send(result);
+                    } else {
+                        res.send(result);
+                    }
+                })
+            } else {
+                res.send([]);
+            }
+        })
+    }
+})
+
+router.post('/pushEventBotActivity', function(req, res) {
+    const chat_id = req.body.chat_id;
+    const event = req.body.event;
+     
+    if (chat_id && event) {
+        const q = `
+            insert into bot_activities (chat_id, event, date) values (${chat_id}, '${event}', curdate())
+        `
+
+        conne.query(q, (rows) => {
+            if (rows.affectedRows !== 0) {
+                res.send(true)
+            } else {
+                res.send(false)
+            }
+        })
+    }
+})
+
+router.post('/getAnalysticBotActivities', function(req, res) {
+    const chat_id = req.body.chat_id;
+    let date_from = req.body.date_from;
+    let date_to = req.body.date_to;
+
+    if (chat_id) {
+
+        if (date_to === 'today') {
+            const today = new Date(Date.now());
+            
+            date_to = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+        }
+        const q_restrict = `SELECT concat(cast(monthname(date) as char(3)),' ', day(date)) as ym, count(*) as cnt FROM bot_activities WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and event = 'restrict' group by ym`;
+        const q_sent = `SELECT concat(cast(monthname(date) as char(3)),' ', day(date)) as ym, count(*) as cnt FROM bot_activities WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and (event = 'faq' or event = 'welcome') group by ym`;
+        const q_deleted = `SELECT concat(cast(monthname(date) as char(3)),' ', day(date)) as ym, count(*) as cnt FROM bot_activities WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and event = 'deleted' group by ym`;
+        const q_kick = `SELECT concat(cast(monthname(date) as char(3)),' ', day(date)) as ym, count(*) as cnt FROM bot_activities WHERE date between '${date_from}' and '${date_to}' and chat_id=${chat_id} and event = 'kick' group by ym`;
+
+        let result_rows_restrict, result_rows_sent, result_rows_deleted, result_rows_kick;
+
+        conne.query(q_restrict, rows => {
+                result_rows_restrict = rows;
+                conne.query(q_sent, rows_sent => {
+                    result_rows_sent = rows_sent;
+                    conne.query(q_deleted, rows_deleted => {
+                        result_rows_deleted = rows_deleted;
+                        conne.query(q_kick, rows_kick => {
+                            result_rows_kick = rows_kick;
+                            res.send({
+                                restrict: result_rows_restrict,
+                                sent: result_rows_sent,
+                                deleted: result_rows_deleted,
+                                kick: result_rows_kick
+                            });
+                        })
+                    })
+                })
+            
+        })
+    }
+})
+router.post('/setPoll', function(req, res) {
+    
+    bot.sendPoll()
+})
+
+router.post('/getPoll', function(req, res) {
+    const chat_id = req.body.chat_id;
+
+    if (chat_id) {
+        const q = `
+            SELECT * FROM poll WHERE chat_id=${chat_id}
+        `
+
+        conne(q, rows => {
+            if (rows.length !== 0) {
+                res.send(rows);
+            } else{
+                res.send(false);
+            }
+        })
+    }
+})
 module.exports = router;

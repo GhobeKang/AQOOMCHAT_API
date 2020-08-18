@@ -22,7 +22,7 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.all('/*', function(req, res, next) {
   const origin_url = req.get('Origin');
-  if (origin_url === 'https://aqoom.chat' || origin_url === 'https://fd23ca2b.ngrok.io') {
+  if (origin_url === 'https://aqoom.chat' || origin_url === 'https://96e2ec058eec.ngrok.io') {
     res.header('Access-Control-Allow-Origin', origin_url);
   }
   
