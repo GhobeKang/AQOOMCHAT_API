@@ -5,6 +5,7 @@ const {format} = require('util');
 var cookieParser = require('cookie-parser');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
+const Axios = require('axios');
 
 var router = express.Router();
 router.use(cookieParser());
@@ -1588,4 +1589,50 @@ router.post('/getPoll', function(req, res) {
         })
     }
 })
+
+router.get('/dashboard/getchat', function(req, res) {
+    const q = `SELECT type, COUNT(*) as cnt FROM chat GROUP BY type`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
+router.get('/dashboard/get-supergroup-state', function(req, res) {
+    const q = `SELECT status, count(*) as cnt FROM chat WHERE status is not null GROUP BY status`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
+router.get('/dashboard/get-user-amount', function(req, res) {
+    const q = `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date, count(*) as cnt_user FROM user GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
+router.get('/dashboard/get-chat-amount', function(req, res) {
+    const q = `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date, count(*) as cnt_chat FROM chat GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
+router.get('/dashboard/get-message-amount', function(req, res) {
+    const q = `SELECT DATE_FORMAT(date, '%Y-%m-%d') as date, count(*) as cnt FROM message GROUP BY DATE_FORMAT(date, '%Y-%m-%d')`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
 module.exports = router;
