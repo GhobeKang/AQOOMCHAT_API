@@ -1294,7 +1294,7 @@ router.post('/updateAnti', function(req, res) {
     const target_field = req.body.field;
 
     if (chat_id) {
-        const q = `UPDATE anti_spam_options SET ${target_field}=1 WHERE chat_id=${chat_id};`
+        const q = `UPDATE anti_spam_options SET ${target_field}=not ${target_field} WHERE chat_id=${chat_id};`
 
         conne.query(q, (rows) => {
             if (rows.affectedRows !== 0) {
@@ -1612,6 +1612,11 @@ router.get('/dashboard/get-user-amount', function(req, res) {
     const q = `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date, count(*) as cnt_user FROM user GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')`
     conne.query(q, rows => {
         if (rows.length !== 0) {
+            let acc_amount = 0;
+            rows.map((val) => {
+                acc_amount += val.cnt_user;
+                val.accumulated_cnt = acc_amount;
+            })
             res.send(rows)
         }
     })
@@ -1621,6 +1626,11 @@ router.get('/dashboard/get-chat-amount', function(req, res) {
     const q = `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date, count(*) as cnt_chat FROM chat GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')`
     conne.query(q, rows => {
         if (rows.length !== 0) {
+            let acc_amount = 0;
+            rows.map((val) => {
+                acc_amount += val.cnt_chat;
+                val.accumulated_cnt = acc_amount;
+            })
             res.send(rows)
         }
     })
@@ -1628,6 +1638,15 @@ router.get('/dashboard/get-chat-amount', function(req, res) {
 
 router.get('/dashboard/get-message-amount', function(req, res) {
     const q = `SELECT DATE_FORMAT(date, '%Y-%m-%d') as date, count(*) as cnt FROM message GROUP BY DATE_FORMAT(date, '%Y-%m-%d')`
+    conne.query(q, rows => {
+        if (rows.length !== 0) {
+            res.send(rows)
+        }
+    })
+})
+
+router.get('/dashboard/get-bot-activities', function(req,res) {
+    const q = `SELECT event, count(event) as cnt FROM aqoomchat.bot_activities group by event;`;
     conne.query(q, rows => {
         if (rows.length !== 0) {
             res.send(rows)
